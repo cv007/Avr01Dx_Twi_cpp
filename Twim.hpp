@@ -31,8 +31,8 @@
 
     if not using a callback function, you can poll for completion-
 
-        twim0_baud( F_CPU, 100000ul );
-        twim0_on( 0x44 );
+        twim0.baud( 100000ul );             //second rgument defaults to F_CPU
+        twim0.on( 0x44 );
         sei();
 
         u8 wbuf[1] = { 0x55 };              //command to read 4 bytes, as an example
@@ -41,21 +41,21 @@
 
         //blocking until done or a timeout (us)
         if( twim0_waitUS(3000) ){}          //result ok, rbuf has 4 bytes
-        else if( twim0_isBusy() ){          //was timeout, (twim irqs may still be on)
-            twim0_busRecovery();            //can do bus recovery if wanted
+        else if( twim0.isBusy() ){          //was timeout, (twim irqs may still be on)
+            twim0.busRecovery();            //can do bus recovery if wanted
             }
         else {}                             //was nack'd or bus error/collision (twim irqs are off)
 
-        twim0_off();
+        twim0.off();
 
         NOTE: FM+ mode is always used but if do not want it you can modify
-              the twim0_on() function
+              the on_() function
 
 
 public type, functions-
 
                 using
-CallbackT       = void (*)(void);
+CallbackT       = void (*)(Twim&);
 
                 void
 on              (u8 address);
@@ -80,20 +80,21 @@ waitUS          (u16 microseconds);
                 void
 busRecovery     ();
                 void
-baud            (uint32_t cpuHz, uint32_t twiHz)
+baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
 
 ------------------------------------------------------------------------------*/
 
 
+//======================================================================
+//  Twim master
+//======================================================================
                 //declare isr functions with C linkage so Twim class can 
                 //friend them and give access to the private isr function
                 extern "C" void TWI0_TWIM_vect();
                 #if defined(TWI1)
                 extern "C" void TWI1_TWIM_vect();
                 #endif
-//======================================================================
-//  Twim master
-//======================================================================
+
 class
 Twim            {
 
@@ -131,12 +132,12 @@ CallbackT       = void (*)(Twim&);  //has class instance without the need
                 enum { RW = 1 }; //address bit0
                 enum { UNKNOWN = 0, IDLE, OWNER, BUSBUSY, BUSMASK = 3 }; //bus state
                 enum { READOK = RIF|CLKHOLD|OWNER, WRITEOK = WIF|CLKHOLD|OWNER };
-                enum { ENABLE = 1 }; //on/off
+                enum { ENABLE = 1, FMPEN = 2 }; //on/off, FM+ enable
 
                 auto
 enable          () 
                 {
-                twi_.CTRLA or_eq 2; //FM+ enable
+                twi_.CTRLA or_eq FMPEN; //FM+ enable
                 twi_.MCTRLA or_eq ENABLE; //twim enable 
                 }
                 auto
@@ -169,8 +170,8 @@ status          () { return twi_.MSTATUS; }
                 auto
 startIrq        (bool wr) //start a read (wr=0) or write (wr=1), enable irq
                 {
-                wr ? startWrite() : startRead();
                 lastResult_ = false;
+                wr ? startWrite() : startRead();
                 irqAllOn();
                 }
 
@@ -188,9 +189,9 @@ finished        (bool tf) //for isr use, tf=true if success
 initPins        (bool busRecovery) //false = no bus recovery, true = also do bus recovery
                 {
                 uint8_t
-                    scl = twi0_pins.MpinSCL & 7,        //extract all values for easier use/reading
+                    scl = twi0_pins.MpinSCL & 7,    //extract all values for easier use/reading
                     sca = twi0_pins.MpinSCA & 7,
-                    clrbm = ~twi0_pins.pmux_clrbm,      //inverted for bitand use
+                    clrbm = ~twi0_pins.pmux_clrbm,  //inverted for bitand use
                     setbm = twi0_pins.pmux_setbm;
                 volatile uint8_t *pinctrl = &twi0_pins.Mport->PIN0CTRL;
                 volatile uint8_t *pmux = twi0_pins.pmux;
