@@ -157,23 +157,27 @@ blinkerRunS     (u8 n)
                        BLINKER_OFFTIME };
 
                 //master to slave (blinker)
+                template<int N>
                 static bool
-blinkerWriteM   (u8 reg, const u8* v, u8 vlen)
+blinkerWriteM   (u8 reg, const u8(&wbuf)[N])
                 {
+                u8 wr[1] = { reg }; //make it a 1 byte array for writeWrite
                 twim0.baud( 100000ul );
                 twim0.on( BLINKER_SLAVE_ADDRESS );
-                twim0.writeWrite( &reg, 1, v, vlen ); //write register address, write value(s)
+                twim0.writeWrite( wr, wbuf ); //write register address, write value(s)
                 bool ret = twim0.waitUS( 3000 );
                 twim0.off();
                 return ret;
                 }
 
+                template<int N>
                 static bool
-blinkerReadM    (u8 reg, u8* v, u8 vlen)
+blinkerReadM    (u8 reg, u8(&rbuf)[N])
                 {
+                u8 wr[1] = { reg }; //make it a 1 byte array for writeRead
                 twim0.baud( 100000ul );
                 twim0.on( BLINKER_SLAVE_ADDRESS );
-                twim0.writeRead( &reg, 1, v, vlen ); //write register address, read value(s)
+                twim0.writeRead( wr, rbuf ); //write register address, read value(s)
                 bool ret = twim0.waitUS( 3000 );
                 twim0.off();
                 return ret;
@@ -209,40 +213,37 @@ main            ()
                 //blinker device has ram registers, will use ram[0]
                 //to store a value so we can test reading the slave also
                 //if fails, keep trying
-                u8 blinkN = 5; //blink N times in loop below
-                while( ! blinkerWriteM(BLINKER_RAM, &blinkN, 1) ){ //write 1 byte, 5 -> ram[0]
+                //blink N times in loop below (a 1 byte array so can pass as array with length)
+                u8 blinkN[1] = { 5 }; 
+                while( ! blinkerWriteM(BLINKER_RAM, blinkN) ){ //write 1 byte, 5 -> ram[0]
                     blinkerResetM();
                     }
 
                 //table of led on/off value pairs
-                const u8 onOffTbl[] = {
-                    2, 40,      //20ms on, 400ms off
-                    100, 100    //1000ms on, 1000ms off
+                using TblT = struct { u8 onoffMS10[2]; };
+                const TblT onOffTbl[] = {
+                    { 2, 40 },      //20ms on, 400ms off
+                    { 100, 100 }    //1000ms on, 1000ms off
                     };
-                const u8 tblSize = sizeof(onOffTbl)/sizeof(onOffTbl[0]);
-                u8 idx = 0;
 
-                //loop every 2 seconds
-                while( waitMS(2000), 1 ) {
-                    //keep idx inside table
-                    if( idx >= tblSize ) idx = 0;
-                    //write 2 values starting at ONTIME register (master->slave)
-                    if( ! blinkerWriteM(BLINKER_ONTIME, &onOffTbl[idx], 2) ){
+                while( 1 ) {
+
+                    for( auto& tbl : onOffTbl ){                       
+                        //write 2 values starting at ONTIME register (master->slave)
+                        //then get value from register ram[0] (should be same as blinkN initial value above)
+                        if( blinkerWriteM(BLINKER_ONTIME, tbl.onoffMS10) and 
+                            blinkerReadM(BLINKER_RAM, blinkN) ) {
+                            //then blink N times (slave Blinker is doing this)
+                            blinkerRunS( blinkN[0] );
+                            waitMS(2000); //2 seconds between blink 'sets'
+                            continue; //next pair
+                            }
+
+                        //if any errors, do bus recovery (also turns on led for 10 seconds)                                                
                         blinkerResetM();
-                        continue;
+                        //and start over
+                        break;
                         }
-                    //next pair
-                    idx += 2;
-
-                    //get value from register ram[0] (should be same as blinkN initial value above)
-                    //if any error, do bus recovery and turn on led for 10 seconds
-                    if( ! blinkerReadM( BLINKER_RAM, &blinkN, 1) ){
-                        blinkerResetM();
-                        continue; //start over
-                        }
-
-                    //blink N times (slave Blinker is doing this)
-                    blinkerRunS( blinkN );
 
                     } //while
 

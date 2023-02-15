@@ -88,21 +88,19 @@ baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
 //======================================================================
 //  Twim master
 //======================================================================
-                //declare isr functions with C linkage so Twim class can 
+                //declare isr functions with C linkage so Twim class can
                 //friend them and give access to the private isr function
                 extern "C" void TWI0_TWIM_vect();
                 #if defined(TWI1)
                 extern "C" void TWI1_TWIM_vect();
                 #endif
 
-class
-Twim            {
+class Twim      {
 
     public:
                 using               //pass reference to Twim so callback
 CallbackT       = void (*)(Twim&);  //has class instance without the need
                                     //to know the class object name
-
     private:
                 CallbackT       isrFuncCallback_;
                 const u8*       txbuf_;     //we do not write to tx buffer(s)
@@ -135,10 +133,10 @@ CallbackT       = void (*)(Twim&);  //has class instance without the need
                 enum { ENABLE = 1, FMPEN = 2 }; //on/off, FM+ enable
 
                 auto
-enable          () 
+enable          ()
                 {
                 twi_.CTRLA or_eq FMPEN; //FM+ enable
-                twi_.MCTRLA or_eq ENABLE; //twim enable 
+                twi_.MCTRLA or_eq ENABLE; //twim enable
                 }
                 auto
 disable         () { twi_.MCTRLA = 0; }
@@ -258,10 +256,10 @@ isr             ()
 Twim            (TWI_t& twi = TWI0) : twi_(twi){}   //specify when creating instance (default is TWI0)
                 #else                               //else twi_ is already set to TWI0
 Twim            (TWI_t& twi = TWI0){ (void)twi; }   //provide a constructor that does nothing so if user
-                #endif                              //does happen to create with TWI0, will be harmless
+                #endif                              //does happen to specify TWI0, will be harmless
 
                 auto
-callback        (CallbackT cb) { isrFuncCallback_ = cb; } //optional, else use twim_waitUS
+callback        (CallbackT cb) { isrFuncCallback_ = cb; } //optional, else use waitUS
                 void
 off             () { disable(); }
                 auto
@@ -277,7 +275,9 @@ isBusy          () { return twi_.MCTRLA bitand RWIEN; } //if irq on, is busy
                 auto
 resultOK        () { return lastResult_; }
 
+
                 //write+read (or write only, or read only)
+                //pointers with user provided lengths
                 auto
 writeRead       (const u8* wbuf, u16 wn, u8* rbuf, u16 rn)
                 {
@@ -287,7 +287,16 @@ writeRead       (const u8* wbuf, u16 wn, u8* rbuf, u16 rn)
                 startIrq( wn ); //if no write (wn==0), then will start a read irq
                 }
 
+                //references with template where length is deduced from type
+                template<int Nw, int Nr>
+                auto
+writeRead       (const u8 (&wbuf)[Nw], u8(&rbuf)[Nr])
+                {
+                writeRead( wbuf, Nw, rbuf, Nr );
+                }
+
                 //write/write (such as a command, then a buffer)
+                //pointers with user provided lengths
                 auto
 writeWrite      (const u8* wbuf, u16 wn, const u8* wbuf2, u16 wn2)
                 {
@@ -297,13 +306,32 @@ writeWrite      (const u8* wbuf, u16 wn, const u8* wbuf2, u16 wn2)
                 startIrq( 1 ); //write only
                 }
 
+                //references with template where length is deduced from type
+                template<int Nw, int Nw2> auto
+writeWrite      (const u8(&wbuf)[Nw], const u8(&wbuf2)[Nw2])
+                {
+                writeWrite( wbuf, Nw, wbuf2, Nw2 );
+                }
+
                 //write only alias
+                //pointer with user provided length
                 auto
 write           (const u8* wbuf, u16 wn) { writeRead( wbuf, wn, 0, 0); }
 
+                //reference with template where length is deduced from type
+                template<int Wn> auto
+write           (const u8(&wbuf)[Wn]) { writeRead( wbuf, Wn, 0, 0); }
+
                 //read only alias
+                //pointer with user provided length
                 auto
 read            (u8* rbuf, u16 rn) { writeRead( 0, 0, rbuf, rn); }
+
+                //reference with template where length is deduced from type
+                template<int Rn> auto
+read            (u8(&rbuf)[Rn]) { writeRead( 0, 0, rbuf, Rn ); }
+
+
 
                 //blocking wait with timeout
                 //if false is returned, caller can check isBusy() to see

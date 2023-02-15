@@ -82,8 +82,7 @@ addressMask     (u8 SlaveAddressMask); //no 2nd address when using this option
                 extern "C" void TWI1_TWIS_vect();
                 #endif
 
-class
-Twis            {
+class Twis      {
 
     public:
 

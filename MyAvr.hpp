@@ -19,3 +19,10 @@ using u16 = uint16_t;
 using i16 = int16_t;
 using u32 = uint32_t;
 using i32 = int32_t;
+
+
+//======================================================================
+//  common utility functions
+//======================================================================
+template<typename T, int N>
+int arraySize(T(&t)[N]){ (void)t; return N; }
