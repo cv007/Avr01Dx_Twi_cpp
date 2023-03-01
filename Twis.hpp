@@ -221,7 +221,7 @@ isr_            ()
                 //static function so C isr function can call function without object
                 //we will lookup the object and call the isr_() function
                 static void 
-isr             (u8 n) { instance_[n]->isr_(); }
+isr             (u8 n = 0) { instance_[n]->isr_(); }
 
 
 public:
