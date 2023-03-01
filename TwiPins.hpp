@@ -20,7 +20,7 @@ default SDA      PA2          PB1         PA1
     uncomment the set of pins that suits your mcu (instead of using a
     series of ifdef's which get harder to manage as more mcu's are added)
 
-    add more as needed (can also add twi1_ pins if needed)
+    add more as needed (can also add twi1 pins if needed)
 
     portmux register names are not all the same, and the twi
     bitfields in the portmux register also can be different
@@ -41,7 +41,7 @@ TwiPinsT        {
                 u8 SpinSCA;         // 0-7
                 volatile u8* pmux;  // &PORTMUX.twi_register
                 u8 pmux_clrbm;      // bitmask values to clear/set the appropriate twi bitfields in portmux to select a set of pins
-                u8 pmux_setbm;      //  the clrbm (inverted) will be used to reset bitfield to default, the setbm will set the desired value
+                u8 pmux_setbm;      //  the clrbm will be used to reset bitfield to default, the setbm will set the desired value
                 };
 
 

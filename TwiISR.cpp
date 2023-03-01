@@ -5,14 +5,16 @@
 #include "Twis.hpp"
 #include "Twim.hpp"
 
-//call the static function isr with the instance number
-//the Twix class will use the instance number to lookup
-//the object, then call the object's isr_ function
-//(default instance number is 0)
+//TWIxN_ISR_ENABLE located in MyAvr.hpp
+
+//call the static function isr() with the instance number
+//the Twim/Twis class will use the instance number to lookup
+//the object, then call the object's private isr_() function
+//(default instance number for isr() is 0)
 
 //this method is used so the class is not required to be
-//all static, and allows the same use when the mcu has
-//more than one twi instance
+//all static, and allows the use of more than one twi
+//instance (TWI1) if available
 
 
 #if defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE
@@ -23,13 +25,9 @@ ISR             (TWI0_TWIM_vect) { Twim::isr(); }
 #endif
 
 
-#if defined( TWI1 )
-
-#if defined(TWIM1_ISR_ENABLE) && TWIM1_ISR_ENABLE
+#if defined(TWI1) && defined(TWIM1_ISR_ENABLE) && TWIM1_ISR_ENABLE
 ISR             (TWI1_TWIS_vect) { Twis::isr(1);} //1 = TWI1
 #endif
-#if defined(TWIM1_ISR_ENABLE) && TWIM1_ISR_ENABLE
+#if defined(TWI1) && defined(TWIM1_ISR_ENABLE) && TWIM1_ISR_ENABLE
 ISR             (TWI1_TWIM_vect) { Twim::isr(1); }
-#endif
-
 #endif

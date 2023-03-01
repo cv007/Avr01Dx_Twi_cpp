@@ -6,11 +6,11 @@
 #include "TwiPins.hpp"
 
 /*------------------------------------------------------------------------------
-    * in MyAvr.hpp, enable the isr via the define-
+    * in MyAvr.hpp, enable the appropriate isr via the define-
         #define TWIS0_ISR_ENABLE 1
-    
+
     * add TwiISR.cpp to the project
-    
+
     * include this header-
         #include "Twis.hpp"
 
@@ -54,35 +54,20 @@
 
 public enum, callback type, functions-
 
-enum
-IRQ_STATE       { TWIS_ADDRESSED, TWIS_MREAD, TWIS_MWRITE, TWIS_STOPPED, TWIS_ERROR };
-                using
-CallbackT       = bool(*)(Twis& twi, IRQ_STATE state, u8 statusReg);
+enum    IRQ_STATE       { TWIS_ADDRESSED, TWIS_MREAD, TWIS_MWRITE, TWIS_STOPPED, TWIS_ERROR };
+        CallbackT       = bool(*)(Twis& twi, IRQ_STATE state, u8 statusReg);
 
-Twis            (TWI_t); //constructor argument required if mcu has more than single instance of TWI
-                void
-on              (u8 SlaveAddress, twis_callback_t callbackFunction);
-                void
-off             ();
-                void
-write           (u8 value);
-                u8
-read            ();
-                u8
-lastAddress     ();
-                void
-address2        (u8 SlaveAddress2);
-                void
-addressMask     (u8 SlaveAddressMask); //no 2nd address when using this option
+        Twis            (const TwiPinsT& pins, TWI_t twiN = TWI0);
+void    on              (u8 SlaveAddress, twis_callback_t callbackFunction);
+void    off             ();
+void    write           (u8 value);
+u8      read            ();
+u8      lastAddress     ();
+void    address2        (u8 SlaveAddress2);
+void    addressMask     (u8 SlaveAddressMask); //no 2nd address when using this option
+u8      twiN            (); //return twi number we are using (0=TWI0, 1=TWI1)
 
 ------------------------------------------------------------------------------*/
-
-//if the isr is not enabled via defines, do not allow this class
-//to be used as it depends on the isr to function
-#if defined(TWIS0_ISR_ENABLE) && TWIS0_ISR_ENABLE
-//======================================================================
-//   Twis - Twi slave
-///======================================================================
                 //declare isr functions with C linkage so Twim class can
                 //friend them and give access to the private isr function
                 extern "C" void TWI0_TWIS_vect();
@@ -90,7 +75,8 @@ addressMask     (u8 SlaveAddressMask); //no 2nd address when using this option
                 extern "C" void TWI1_TWIS_vect();
                 #endif
 
-class Twis      {
+class 
+Twis            {
 
     public:
 
@@ -218,13 +204,13 @@ isr_            ()
                 friend void TWI1_TWIS_vect();
                 #endif
 
-                //static function so C isr function can call function without object
+                //static function so C isr function can call without object
                 //we will lookup the object and call the isr_() function
-                static void 
+                //(this allows use of TWI1 if available, using same code)
+                static void
 isr             (u8 n = 0) { instance_[n]->isr_(); }
 
-
-public:
+    public:
 
                 #if defined(TWI1)                   //more than 1 twi instance available
 Twis            (const TwiPinsT& pins, TWI_t& twi = TWI0) : twi_(twi){ initPins(pins); }
@@ -235,31 +221,32 @@ Twis            (const TwiPinsT& pins, TWI_t& twi = TWI0){ (void)twi; initPins(p
                 auto
 on              (u8 addr, CallbackT cb)
                 {
-                if( ! cb ) return;                  //do not accept callback set to 0
+                if( ! cb ) return *this;            //do not accept callback set to 0
                 isrFuncCallback_ = cb;
                 off_();                             //will also clear flags
                 address1( addr );
                 irqAllOn();
                 on_();
+                return *this;
                 }
                 auto
 off             ()
                 {
                 irqAllOff();
                 off_();
+                return *this;
                 }
                 auto
-write           (u8 v) { twi_.SDATA = v; }
+write           (u8 v) { twi_.SDATA = v; return *this; }
                 u8
 read            () { return twi_.SDATA; }
                 u8
-lastAddress     () { return lastAddress_; }         //last address we responded to
+lastAddress     () { return lastAddress_; } //last address we responded to
                 auto
-address2        (u8 v) { address2(v, true); }       //2nd address
+address2        (u8 v) { address2(v, true); return *this; } //2nd address
                 auto
-addressMask     (u8 v) { address2(v, false); }      //address mask (no 2nd address)
+addressMask     (u8 v) { address2(v, false); return *this; } //address mask (no 2nd address)
+                u8
+twiN            () { return &twi_ != &TWI0; }; //return twi number we are using (0=TWI0, 1=TWI1)
 
                 }; // Twis class
-
-
-#endif //defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE

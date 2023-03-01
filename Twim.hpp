@@ -5,13 +5,12 @@
 #include "MyAvr.hpp"
 #include "TwiPins.hpp"
 
-
 /*------------------------------------------------------------------------------
     * in MyAvr.hpp, enable the isr via the define-
         #define TWIM0_ISR_ENABLE 1
-    
+
     * add TwiISR.cpp to the project
-    
+
     * include this header-
         #include "Twim.hpp"
 
@@ -66,43 +65,22 @@
 
 public type, functions-
 
-                using
-CallbackT       = void (*)(Twim&);
+CallbackT = void (*)(Twim&);
 
-                void
-on              (u8 address);
-                void
-off             ();
-                bool
-isBusy          ();
-                bool
-resultOK        ();
-                void
-callback        (CallbackT callbackFunction);
-                void
-writeRead       (const u8* writeBuffer, u16 writeLength, u8* readBuffer, u16 readLength);
-                void
-writeWrite      (const u8* writeBuffer, u16 writeLength, const u8* writeBuffer2, u16 writeLength2);
-                void
-write           (const u8* writeBuffer, u16 writeLength);
-                void
-read            (u8* readBuffer, u16 readLength);
-                bool
-waitUS          (u16 microseconds);
-                void
-busRecovery     ();
-                void
-baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
-
+void    on              (u8 address);
+void    off             ();
+bool    isBusy          ();
+bool    resultOK        ();
+void    callback        (CallbackT callbackFunction);
+void    writeRead       (const u8* writeBuffer, u16 writeLength, u8* readBuffer, u16 readLength);
+void    writeWrite      (const u8* writeBuffer, u16 writeLength, const u8* writeBuffer2, u16 writeLength2);
+void    write           (const u8* writeBuffer, u16 writeLength);
+void    read            (u8* readBuffer, u16 readLength);
+bool    waitUS          (u16 microseconds);
+void    baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
+void    busRecovery     ();
+u8      twiN            (); //return twi number we are using (0=TWI0, 1=TWI1)
 ------------------------------------------------------------------------------*/
-
-
-//if the isr is not enabled via defines, do not allow this class
-//to be used as it depends on the isr to function
-#if defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE
-//======================================================================
-//  Twim master
-//======================================================================
                 //declare isr functions with C linkage so Twim class can
                 //friend them and give access to the private isr function
                 extern "C" void TWI0_TWIM_vect();
@@ -110,7 +88,8 @@ baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
                 extern "C" void TWI1_TWIM_vect();
                 #endif
 
-class Twim      {
+class 
+Twim            {
 
     public:
                 using               //pass reference to Twim so callback
@@ -129,11 +108,11 @@ CallbackT       = void (*)(Twim&);  //has class instance without the need
 
                 #if defined(TWI1)           //more than 1 twi instance available
                 TWI_t&          twi_;       //so contructor will set twi instance
-                static inline Twim* instance_[2];
+                static inline Twim* instance_[2]; //store object's 'this' for C isr to use
                 #else                       //only 1 instance, can optimize by setting
                 static inline               //create inside header w/C++17 (-std=c++17)
                 TWI_t&          twi_{ TWI0 }; //the twi_ reference value here
-                static inline Twim* instance_[1];
+                static inline Twim* instance_[1]; //store object 'this' for C isr to use
                 #endif
 
                 //local enums
@@ -247,8 +226,9 @@ isr_            ()
                 finished( false );
                 }
 
-                //static function so C isr function can call function without object
+                //static function so C isr function can call without object
                 //we will lookup the object and call the isr_() function
+                //(this allows use of TWI1 if available, using same code)
                 static void
 isr             (u8 n = 0){ instance_[n]->isr_(); }
 
@@ -272,15 +252,16 @@ Twim            (const TwiPinsT& pins, TWI_t& twi = TWI0)
                 #endif                              //can also specify TWI0, not needed but harmless
 
                 auto
-callback        (CallbackT cb) { isrFuncCallback_ = cb; } //optional, else use waitUS
-                void
-off             () { disable(); }
+callback        (CallbackT cb) { isrFuncCallback_ = cb; return *this; } //optional, else use waitUS
                 auto
-on              (u8 addr)
+off             () { disable(); return *this; }
+                auto
+on              (u8 addr = 0) //if not supplied, reuse address already in use
                 {
                 address(addr);
                 toStateIdle();
                 enable();
+                return *this;
                 }
                 auto
 isBusy          () { return twi_.MCTRLA bitand RWIEN; } //if irq on, is busy
@@ -288,76 +269,65 @@ isBusy          () { return twi_.MCTRLA bitand RWIEN; } //if irq on, is busy
 resultOK        () { return lastResult_; }
 
 
+                //write/read functions
+
                 //write+read (or write only, or read only)
-                //pointers with user provided lengths
-                auto
+                auto //pointers with user provided lengths, or called from writeRead function templates
 writeRead       (const u8* wbuf, u16 wn, u8* rbuf, u16 rn)
                 {
                 txbuf_ = wbuf; txbufEnd_ = &wbuf[wn];
                 rxbuf_ = rbuf; rxbufEnd_ = &rbuf[rn];
                 txbuf2_ = 0; txbuf2End_ = 0;
                 startIrq( wn ); //if no write (wn==0), then will start a read irq
+                return *this;
                 }
-                //references with template where length is deduced from type
-                template<int Nw, int Nr> auto
-writeRead       (const u8 (&wbuf)[Nw], u8(&rbuf)[Nr]) { writeRead( wbuf, Nw, rbuf, Nr ); }
-                //write 1 byte, read >1 bytes
-                template<int Nr> auto
-writeRead       (const u8& wbyte, u8(&rbuf)[Nr]) { writeRead( &wbyte, 1, rbuf, Nr ); }
-                //write >1 bytes, read 1 byte
-                template<int Nw> auto
-writeRead       (const u8(&wbuf)[Nw], u8& rbyte) { writeRead( wbuf, Nw, &rbyte, 1 ); }
-                //write 1 byte, read 1 byte
-                auto
-writeRead       (const u8& wbyte, u8& rbyte) { writeRead( &wbyte, 1, &rbyte, 1 ); }
+
+                //functions templates where length is deduced from type
+                template<int Nw, int Nr> auto //write >1 bytes, read >1 bytes
+writeRead       (const u8 (&wbuf)[Nw], u8(&rbuf)[Nr]) { return writeRead( wbuf, Nw, rbuf, Nr ); }
+                template<int Nr> auto //write 1 byte, read >1 bytes
+writeRead       (const u8& wbyte, u8(&rbuf)[Nr]) { return writeRead( &wbyte, 1, rbuf, Nr ); }
+                template<int Nw> auto //write >1 bytes, read 1 byte
+writeRead       (const u8(&wbuf)[Nw], u8& rbyte) { return writeRead( wbuf, Nw, &rbyte, 1 ); }
+                auto //write 1 byte, read 1 byte
+writeRead       (const u8& wbyte, u8& rbyte) { return writeRead( &wbyte, 1, &rbyte, 1 ); }
 
 
                 //write/write (such as a command, then a buffer)
-                //pointers with user provided lengths
-                auto
+                auto //pointers with user provided lengths, or called from writeWrite function templates
 writeWrite      (const u8* wbuf, u16 wn, const u8* wbuf2, u16 wn2)
                 {
                 txbuf_ = wbuf; txbufEnd_ = &wbuf[wn];
                 txbuf2_ = wbuf2; txbuf2End_ = &wbuf2[wn2];
                 rxbuf_ = 0; rxbufEnd_ = 0; //no read
                 startIrq( 1 ); //write only
+                return *this;
                 }
-                //references with template where length is deduced from type
+
+                //functions templates where length is deduced from type
                 template<int Nw, int Nw2> auto
-writeWrite      (const u8(&wbuf)[Nw], const u8(&wbuf2)[Nw2]) { writeWrite( wbuf, Nw, wbuf2, Nw2 ); }
-                //1 byte write, >1 bytes write
-                template<int Nw2> auto
-writeWrite      (const u8& wbyte, const u8(&wbuf2)[Nw2]) { writeWrite( &wbyte, 1, wbuf2, Nw2 ); }
-                //>1 bytes write, 1 byte write
-                template<int Nw> auto
-writeWrite      (const u8(&wbuf)[Nw], const u8& wbyte2) { writeWrite( wbuf, Nw, &wbyte2, 1 ); }
-                //>1 bytes write, 1 byte write
-                auto
-writeWrite      (const u8 &wbyte, const u8& wbyte2) { writeWrite( &wbyte, 1, &wbyte2, 1 ); }
+writeWrite      (const u8(&wbuf)[Nw], const u8(&wbuf2)[Nw2]) { return writeWrite( wbuf, Nw, wbuf2, Nw2 ); }
+                template<int Nw2> auto //1 byte write, >1 bytes write
+writeWrite      (const u8& wbyte, const u8(&wbuf2)[Nw2]) { return writeWrite( &wbyte, 1, wbuf2, Nw2 ); }
+                template<int Nw> auto //>1 bytes write, 1 byte write
+writeWrite      (const u8(&wbuf)[Nw], const u8& wbyte2) { return writeWrite( wbuf, Nw, &wbyte2, 1 ); }
+                auto //>1 bytes write, 1 byte write
+writeWrite      (const u8 &wbyte, const u8& wbyte2) { return writeWrite( &wbyte, 1, &wbyte2, 1 ); }
 
+                //write/read only alias using writeRead
 
-                //write only alias
-                //pointer with user provided length
-                auto
-write           (const u8* wbuf, u16 wn) { writeRead( wbuf, wn, 0, 0); }
-                //reference with template where length is deduced from type
-                template<int Wn> auto
-write           (const u8(&wbuf)[Wn]) { writeRead( wbuf, Wn, 0, 0); }
-                //1 byte only
-                auto
-write           (const u8& wbyte) { writeRead( &wbyte, 1, 0, 0); }
-
-
-                //read only alias
-                //pointer with user provided length
-                auto
-read            (u8* rbuf, u16 rn) { writeRead( 0, 0, rbuf, rn); }
-                //reference with template where length is deduced from type
-                template<int Rn> auto
-read            (u8(&rbuf)[Rn]) { writeRead( 0, 0, rbuf, Rn ); }
-                //1 byte only
-                auto
-read            (u8& rbyte) { writeRead( 0, 0, &rbyte, 1 ); }
+                auto //pointer with user provided length
+write           (const u8* wbuf, u16 wn) { return writeRead( wbuf, wn, 0, 0); }
+                template<int Wn> auto //length is deduced from type
+write           (const u8(&wbuf)[Wn]) { return writeRead( wbuf, Wn, 0, 0); }
+                auto //1 byte only
+write           (const u8& wbyte) { return writeRead( &wbyte, 1, 0, 0); }
+                auto //pointer with user provided length
+read            (u8* rbuf, u16 rn) { return writeRead( 0, 0, rbuf, rn); }
+                template<int Rn> auto //length is deduced from type
+read            (u8(&rbuf)[Rn]) { return writeRead( 0, 0, rbuf, Rn ); }
+                auto //1 byte only
+read            (u8& rbyte) { return writeRead( 0, 0, &rbyte, 1 ); }
 
 
                 //blocking wait with timeout
@@ -371,14 +341,15 @@ waitUS          (u16 us)
                 return resultOK(); //true = ok, false = error or timeout
                 }
 
-                void
+                auto
 baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
                 {
                 int32_t v = cpuHz/twiHz/2 - 5;
                 twi_.MBAUD = v >= 0 ? v : 0;
+                return *this;
                 }
 
-                void
+                auto
 busRecovery     () //twi will be off when done
                 {
                 disable(); //turn off twi so we have control of pins
@@ -398,8 +369,10 @@ busRecovery     () //twi will be off when done
                 pt->DIRCLR = sclbm;             //scl back to input w/pullup
                 _delay_us( 30 );
                 pt->DIRCLR = scabm;             //sca back to input w/pullup
+                return *this;
                 }
 
-                }; //Twim class
+                u8
+twiN            () { return &twi_ != &TWI0; };  //return twi number we are using (0=TWI0, 1=TWI1)
 
-#endif //defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE
+                }; //Twim class
