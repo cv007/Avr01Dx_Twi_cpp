@@ -7,16 +7,26 @@
 
 
 /*------------------------------------------------------------------------------
-    1. uncomment the appropriate set of pins for your mcu
-        in twiPins.h to select the twi pins to use
-    2. create a class instance (name of your choosing)
-        Twim twim0; //if only TWI0 available, no argument needed
-        Twim twim1{ TWI1 }; //else need to specify which peripheral instance
-    2. set baud
+    * in MyAvr.hpp, enable the isr via the define-
+        #define TWIM0_ISR_ENABLE 1
+    
+    * add TwiISR.cpp to the project
+    
+    * include this header-
+        #include "Twim.hpp"
+
+    * uncomment/create the appropriate set of pins for your mcu
+      in twiPins.h to allow the use of the twi pins (name given not important)
+        static const TwiPinsT TWI0_pins = { ... };
+    * create a class instance (name of your choosing), specify pins to use
+      and twi instance if mcu has TWI1 available
+        Twim twim0{ TWI0_pins }; //if only TWI0 available, no need to specify
+        Twim twim1{ TWI0_pins, TWI1 }; //else need to specify which peripheral instance
+    * set baud
         twim0.baud( 100000ul ); //100kHz (optional second arg- cpu speed, defaults to F_CPU)
-    3. turn on, specifying slave address
+    * turn on, specifying slave address
         twim0.on( 0x44 );
-    4. enable interrupts via sei() (avr/interrupts.h)
+    * enable interrupts via sei() (avr/interrupts.h)
 
 
     optionally set a callback function if not polling via twim0.waitUS()
@@ -40,11 +50,13 @@
         twim0_writeRead( wbuf, 1, rbuf, 4 );//write 1 byte (0x55), read 4 bytes
 
         //blocking until done or a timeout (us)
-        if( twim0_waitUS(3000) ){}          //result ok, rbuf has 4 bytes
+        if( twim0_waitUS(3000) ){           //result ok, rbuf has 4 bytes
+            }
         else if( twim0.isBusy() ){          //was timeout, (twim irqs may still be on)
             twim0.busRecovery();            //can do bus recovery if wanted
             }
-        else {}                             //was nack'd or bus error/collision (twim irqs are off)
+        else {                              //was nack'd or bus error/collision (twim irqs are off)
+            }
 
         twim0.off();
 
@@ -85,6 +97,9 @@ baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
 ------------------------------------------------------------------------------*/
 
 
+//if the isr is not enabled via defines, do not allow this class
+//to be used as it depends on the isr to function
+#if defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE
 //======================================================================
 //  Twim master
 //======================================================================
@@ -110,12 +125,15 @@ CallbackT       = void (*)(Twim&);  //has class instance without the need
                 u8*             rxbuf_;     //we need to write to rx buffer
                 const u8*       rxbufEnd_;
                 volatile bool   lastResult_; //1=ok,0=fail
+                const TwiPinsT& pins_;
 
                 #if defined(TWI1)           //more than 1 twi instance available
                 TWI_t&          twi_;       //so contructor will set twi instance
+                static inline Twim* instance_[2];
                 #else                       //only 1 instance, can optimize by setting
                 static inline               //create inside header w/C++17 (-std=c++17)
                 TWI_t&          twi_{ TWI0 }; //the twi_ reference value here
+                static inline Twim* instance_[1];
                 #endif
 
                 //local enums
@@ -159,9 +177,9 @@ startRead       () { ackActionACK(); twi_.MADDR or_eq RW; } //reuse existing add
                 auto
 startWrite      () { twi_.MADDR and_eq compl RW; } //reuse existing address
                 auto
-write           (u8 v) { twi_.MDATA = v; }
+write1          (u8 v) { twi_.MDATA = v; }
                 auto
-read            () { return twi_.MDATA; }
+read1           () { return twi_.MDATA; }
                 auto
 status          () { return twi_.MSTATUS; }
 
@@ -184,43 +202,22 @@ finished        (bool tf) //for isr use, tf=true if success
                 }
 
                 auto
-initPins        (bool busRecovery) //false = no bus recovery, true = also do bus recovery
+initPins        ()
                 {
                 uint8_t
-                    scl = twi0_pins.MpinSCL & 7,    //extract all values for easier use/reading
-                    sca = twi0_pins.MpinSCA & 7,
-                    clrbm = ~twi0_pins.pmux_clrbm,  //inverted for bitand use
-                    setbm = twi0_pins.pmux_setbm;
-                volatile uint8_t *pinctrl = &twi0_pins.Mport->PIN0CTRL;
-                volatile uint8_t *pmux = twi0_pins.pmux;
-
-                disable(); //turn off twi
+                    scl = pins_.MpinSCL & 7,    //extract all values for easier use/reading
+                    sca = pins_.MpinSCA & 7,
+                    clrbm = ~pins_.pmux_clrbm,  //inverted for bitand use
+                    setbm = pins_.pmux_setbm;
+                volatile uint8_t *pinctrl = &pins_.Mport->PIN0CTRL;
+                volatile uint8_t *pmux = pins_.pmux;
 
                 //enable pullups and set portmux as needed (some have no alt pins, so no twi portmux)
                 pinctrl[scl] = PORT_PULLUPEN_bm; //assignment, will set all other bits to 0
                 pinctrl[sca] = PORT_PULLUPEN_bm; // if need invert or isc bits for some reason, change to |=
                 if( pmux ) *pmux = (*pmux bitand clrbm) bitor setbm; //compiler will optimize if bitfield is a single bit
-                if( busRecovery == false ) return;
-
-                //also do bus recovery
-
-                uint8_t sclbm = 1<<(twi0_pins.MpinSCL & 7), scabm = 1<<(twi0_pins.MpinSCA & 7);
-                PORT_t* pt = twi0_pins.Mport;
-
-                pt->OUTSET = sclbm;             //scl high
-                pt->DIRSET = sclbm;             //scl output
-                for( u8 i = 0; i < 19; i++ ){   //10 clocks (20 toggles, but leave low so 19)
-                    pt->OUTTGL = sclbm;
-                    _delay_us( 5 );             //5us half cycle = 100khz
-                    }
-                //produce a stop
-                pt->OUTCLR = scabm;             //sca low
-                pt->DIRSET = scabm;             //sca output
-                _delay_us( 30 );
-                pt->DIRCLR = sclbm;             //scl back to input w/pullup
-                _delay_us( 30 );
-                pt->DIRCLR = scabm;             //sca back to input w/pullup
                 }
+
 
                 //friend isr() so ISR in TwiISR.cpp can access this private function
                 //if TWI1 available, friend it also (even if unused)
@@ -229,34 +226,50 @@ initPins        (bool busRecovery) //false = no bus recovery, true = also do bus
                 friend void TWI1_TWIM_vect();
                 #endif
 
-                auto
-isr             ()
+                void
+isr_            ()
                 {
                 u8 s = status();
                 //error
                 if( s & ANYERR ) return finished( false );
                 //read
                 if( s == READOK ){
-                    *rxbuf_++ = read();
+                    *rxbuf_++ = read1();
                     return rxbuf_ < rxbufEnd_ ? ACKread() : finished( true );
                     }
                 //write
                 if( s == WRITEOK ){
-                    if( txbuf_ < txbufEnd_ ) return write( *txbuf_++ ); //more data
-                    if( txbuf2_ < txbuf2End_ ) return write( *txbuf2_++ ); //more data
+                    if( txbuf_ < txbufEnd_ ) return write1( *txbuf_++ ); //more data
+                    if( txbuf2_ < txbuf2End_ ) return write1( *txbuf2_++ ); //more data
                     return rxbuf_ ? startRead() : finished( true ); //switch to read? or done
                     }
                 //unknown, or a write nack
                 finished( false );
                 }
 
+                //static function so C isr function can call function without object
+                //we will lookup the object and call the isr_() function
+                static void
+isr             (u8 n){ instance_[n]->isr_(); }
+
     public:
 
                 #if defined(TWI1)                   //more than 1 twi instance available
-Twim            (TWI_t& twi = TWI0) : twi_(twi){}   //specify when creating instance (default is TWI0)
+Twim            (const TwiPinsT& pins, TWI_t& twi = TWI0)
+                : twi_(twi)
+                {
+                initPins();
+                instance_[twi == TWI0 ? 0 : 1] = this;
+                }
                 #else                               //else twi_ is already set to TWI0
-Twim            (TWI_t& twi = TWI0){ (void)twi; }   //provide a constructor that does nothing so if user
-                #endif                              //does happen to specify TWI0, will be harmless
+Twim            (const TwiPinsT& pins, TWI_t& twi = TWI0)
+                : pins_(pins)
+                {
+                (void)twi;
+                initPins();
+                instance_[0] = this;
+                }
+                #endif                              //can also specify TWI0, not needed but harmless
 
                 auto
 callback        (CallbackT cb) { isrFuncCallback_ = cb; } //optional, else use waitUS
@@ -265,7 +278,6 @@ off             () { disable(); }
                 auto
 on              (u8 addr)
                 {
-                initPins(false); //will also turn off twim (false=no bus recovery)
                 address(addr);
                 toStateIdle();
                 enable();
@@ -286,14 +298,19 @@ writeRead       (const u8* wbuf, u16 wn, u8* rbuf, u16 rn)
                 txbuf2_ = 0; txbuf2End_ = 0;
                 startIrq( wn ); //if no write (wn==0), then will start a read irq
                 }
-
                 //references with template where length is deduced from type
-                template<int Nw, int Nr>
+                template<int Nw, int Nr> auto
+writeRead       (const u8 (&wbuf)[Nw], u8(&rbuf)[Nr]) { writeRead( wbuf, Nw, rbuf, Nr ); }
+                //write 1 byte, read >1 bytes
+                template<int Nr> auto
+writeRead       (const u8& wbyte, u8(&rbuf)[Nr]) { writeRead( &wbyte, 1, rbuf, Nr ); }
+                //write >1 bytes, read 1 byte
+                template<int Nw> auto
+writeRead       (const u8(&wbuf)[Nw], u8& rbyte) { writeRead( wbuf, Nw, &rbyte, 1 ); }
+                //write 1 byte, read 1 byte
                 auto
-writeRead       (const u8 (&wbuf)[Nw], u8(&rbuf)[Nr])
-                {
-                writeRead( wbuf, Nw, rbuf, Nr );
-                }
+writeRead       (const u8& wbyte, u8& rbyte) { writeRead( &wbyte, 1, &rbyte, 1 ); }
+
 
                 //write/write (such as a command, then a buffer)
                 //pointers with user provided lengths
@@ -305,32 +322,42 @@ writeWrite      (const u8* wbuf, u16 wn, const u8* wbuf2, u16 wn2)
                 rxbuf_ = 0; rxbufEnd_ = 0; //no read
                 startIrq( 1 ); //write only
                 }
-
                 //references with template where length is deduced from type
                 template<int Nw, int Nw2> auto
-writeWrite      (const u8(&wbuf)[Nw], const u8(&wbuf2)[Nw2])
-                {
-                writeWrite( wbuf, Nw, wbuf2, Nw2 );
-                }
+writeWrite      (const u8(&wbuf)[Nw], const u8(&wbuf2)[Nw2]) { writeWrite( wbuf, Nw, wbuf2, Nw2 ); }
+                //1 byte write, >1 bytes write
+                template<int Nw2> auto
+writeWrite      (const u8& wbyte, const u8(&wbuf2)[Nw2]) { writeWrite( &wbyte, 1, wbuf2, Nw2 ); }
+                //>1 bytes write, 1 byte write
+                template<int Nw> auto
+writeWrite      (const u8(&wbuf)[Nw], const u8& wbyte2) { writeWrite( wbuf, Nw, &wbyte2, 1 ); }
+                //>1 bytes write, 1 byte write
+                auto
+writeWrite      (const u8 &wbyte, const u8& wbyte2) { writeWrite( &wbyte, 1, &wbyte2, 1 ); }
+
 
                 //write only alias
                 //pointer with user provided length
                 auto
 write           (const u8* wbuf, u16 wn) { writeRead( wbuf, wn, 0, 0); }
-
                 //reference with template where length is deduced from type
                 template<int Wn> auto
 write           (const u8(&wbuf)[Wn]) { writeRead( wbuf, Wn, 0, 0); }
+                //1 byte only
+                auto
+write           (const u8& wbyte) { writeRead( &wbyte, 1, 0, 0); }
+
 
                 //read only alias
                 //pointer with user provided length
                 auto
 read            (u8* rbuf, u16 rn) { writeRead( 0, 0, rbuf, rn); }
-
                 //reference with template where length is deduced from type
                 template<int Rn> auto
 read            (u8(&rbuf)[Rn]) { writeRead( 0, 0, rbuf, Rn ); }
-
+                //1 byte only
+                auto
+read            (u8& rbyte) { writeRead( 0, 0, &rbyte, 1 ); }
 
 
                 //blocking wait with timeout
@@ -344,13 +371,6 @@ waitUS          (u16 us)
                 return resultOK(); //true = ok, false = error or timeout
                 }
 
-                //recover locked up bus
-                //NOTE: if you are running the slave on the same pins for some reason
-                //      (not normal), the slave will also need to be disabled so it
-                //      releases its pins (which are the same pins)
-                auto
-busRecovery     () { initPins(true); }
-
                 void
 baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
                 {
@@ -358,4 +378,28 @@ baud            (uint32_t twiHz, uint32_t cpuHz = F_CPU)
                 twi_.MBAUD = v >= 0 ? v : 0;
                 }
 
+                void
+busRecovery     () //twi will be off when done
+                {
+                disable(); //turn off twi so we have control of pins
+                uint8_t sclbm = 1<<(pins_.MpinSCL & 7), scabm = 1<<(pins_.MpinSCA & 7);
+                PORT_t* pt = pins_.Mport;
+
+                pt->OUTSET = sclbm;             //scl high
+                pt->DIRSET = sclbm;             //scl output
+                for( u8 i = 0; i < 19; i++ ){   //10 clocks (20 toggles, but leave low so 19)
+                    pt->OUTTGL = sclbm;
+                    _delay_us( 5 );             //5us half cycle = 100khz
+                    }
+                //produce a stop
+                pt->OUTCLR = scabm;             //sca low
+                pt->DIRSET = scabm;             //sca output
+                _delay_us( 30 );
+                pt->DIRCLR = sclbm;             //scl back to input w/pullup
+                _delay_us( 30 );
+                pt->DIRCLR = scabm;             //sca back to input w/pullup
+                }
+
                 }; //Twim class
+
+#endif //defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE

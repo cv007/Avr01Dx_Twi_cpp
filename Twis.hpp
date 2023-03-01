@@ -6,18 +6,24 @@
 #include "TwiPins.hpp"
 
 /*------------------------------------------------------------------------------
-    Twis.hpp - Twi slave
+    * in MyAvr.hpp, enable the isr via the define-
+        #define TWIS0_ISR_ENABLE 1
+    
+    * add TwiISR.cpp to the project
+    
+    * include this header-
+        #include "Twis.hpp"
 
-    1. uncomment the appropriate set of pins for your mcu
-        in TwiPins.hpp to select the twi pins to use
-    2. create a class instance (name of your choosing)
-        Twis twis0; //if only TWI0 available, no argument needed
-        Twis twis1{ TWI1 }; //else need to specify which peripheral instance
-    3. in TwiISR.cpp, modify/match the appropriate define using the instance
-        name you created in step 2
-    3. turn on with address and callback function
+    * uncomment/create the appropriate set of pins for your mcu
+      in twiPins.h to allow the use of the twi pins (name given not important)
+        static const TwiPinsT TWI0_pins = { ... };
+    * create a class instance (name of your choosing), specify pins to use
+      and twi instance if mcu has TWI1 available
+        Twis twis0{ TWI0_pins }; //if only TWI0 available, no need to specify
+        Twis twis1{ TWI0_pins, TWI1 }; //else need to specify which peripheral instance
+    * turn on with address and callback function
         twis0.on( 0x40, myCallback );
-    4. enable interrupts via sei() (avr/interrupts.h)
+    * enable interrupts via sei() (avr/interrupts.h)
 
     optional - set a 2nd address, or an address mask, can be set at anytime
 
@@ -71,7 +77,9 @@ addressMask     (u8 SlaveAddressMask); //no 2nd address when using this option
 
 ------------------------------------------------------------------------------*/
 
-
+//if the isr is not enabled via defines, do not allow this class
+//to be used as it depends on the isr to function
+#if defined(TWIS0_ISR_ENABLE) && TWIS0_ISR_ENABLE
 //======================================================================
 //   Twis - Twi slave
 ///======================================================================
@@ -97,9 +105,11 @@ CallbackT       = bool(*)(Twis& twi, IRQ_STATE state, u8 statusReg);
                 CallbackT   isrFuncCallback_;
                 #if defined(TWI1)           //more than 1 twi instance available
                 TWI_t&      twi_;           //so contructor will set which instance
+                static inline Twis* instance_[2];
                 #else                       //only 1 instance, can optimize by setting
                 static inline               //(create inside header w/C++17)
                 TWI_t&      twi_{ TWI0 };   //the fixed value here
+                static inline Twis* instance_[1];
                 #endif
 
                 auto
@@ -110,9 +120,10 @@ address2        (u8 v, bool nomask) { twi_.SADDRMASK = (v<<1) bitor nomask; }
 off_            () { twi_.SCTRLA and_eq compl 1; }
                 auto
 on_             ()
-                { //if master/slave pins are the same, not in dual mode so set FMPEN in CTRLA
-                  //if not the same, initPins already took care of FMPEN in the DUALCTRL register
-                if( twi0_pins.MpinSCL == twi0_pins.SpinSCL ) twi_.CTRLA or_eq 2;
+                { //initPins already took care of FMPEN in the DUALCTRL register if needed, so
+                  //just set FMPEN in CTRLA as if not in dual mode and only slave is being used
+                  //(harmless if in dual mode, since the master will also set FMPEN in CTRLA)
+                twi_.CTRLA or_eq 2;
                 twi_.SCTRLA or_eq 1;
                 }
                 auto
@@ -147,39 +158,35 @@ isRxNack        (u8 v) { return (v bitand RXNACKbm); }                   //RXACK
                 auto
 isError         (u8 v) { return (v bitand ERRbm); }                      //COLL,BUSERR
 
+                //called from constructor only
+                //hopefully if only slave is used, this one use will be optimized
                 auto
-initPins        ()
+initPins        (const TwiPinsT& pins)
                 {
                 uint8_t
-                    scl = twi0_pins.SpinSCL & 7,        //extract all values for easier use/reading
-                    sca = twi0_pins.SpinSCA & 7,
-                    clrbm = ~twi0_pins.pmux_clrbm,      //inverted for bitand use
-                    setbm = twi0_pins.pmux_setbm;
-                volatile uint8_t *pinctrl = &twi0_pins.Sport->PIN0CTRL;
-                volatile uint8_t *pmux = twi0_pins.pmux;
+                    scl = pins.SpinSCL & 7,        //extract all values for easier use/reading
+                    sca = pins.SpinSCA & 7,
+                    clrbm = ~pins.pmux_clrbm,      //inverted for bitand use
+                    setbm = pins.pmux_setbm;
+                volatile uint8_t *pinctrl = &pins.Sport->PIN0CTRL;
+                volatile uint8_t *pmux = pins.pmux;
 
                 //enable pullups and set portmux as needed (some have no alt pins, so no twi portmux)
                 pinctrl[scl] or_eq PORT_PULLUPEN_bm;
                 pinctrl[sca] or_eq PORT_PULLUPEN_bm;
                 if( pmux ) *pmux = (*pmux bitand clrbm) bitor setbm; //compiler will optimize if bitfield is a single bit
 
-                //turn on dual mode if master/slave pins are not the same
-                //will assume the user has setup twi0_pins properly, so wants to use dual mode
-                //not all mcu's have dual mode, so using offset from CTRLA to access DUALCTRL so
-                //can compile for all mcu's
-                if( twi0_pins.MpinSCL != twi0_pins.SpinSCL ) (&twi_.CTRLA)[1] or_eq 1; //dual enable
+                //if dual mode available, turn on dual mode if master/slave pins are not the same
+                //will assume the user has setup pins properly, so wants to use dual mode
+                #if defined(TWI0_DUALCTRL) //dual mode available
+                if( pins.MpinSCL != pins.SpinSCL ) twi_.DUALCTRL or_eq 3; //dual enable, fmpen
+                #endif
                 }
 
-                //friend isr() so ISR in TwiISR.cpp can access this private function
-                //if TWI1 available, friend it also (even if unused)
-                friend void TWI0_TWIS_vect();
-                #if defined(TWI1)
-                friend void TWI1_TWIS_vect();
-                #endif
 
                 //callback function returns true if want transaction to proceed
                 auto
-isr             ()
+isr_            ()
                 {
                 static bool is1st;      //so can ignore rxack on first master read
                 u8 s = status();        //get a copy of status
@@ -204,12 +211,25 @@ isr             ()
                 done ? nackComplete() : ack();
                 }
 
+                //friend isr() so ISR in TwiISR.cpp can access this private function
+                //if TWI1 available, friend it also (even if unused)
+                friend void TWI0_TWIS_vect();
+                #if defined(TWI1)
+                friend void TWI1_TWIS_vect();
+                #endif
+
+                //static function so C isr function can call function without object
+                //we will lookup the object and call the isr_() function
+                static void 
+isr             (u8 n) { instance_[n]->isr_(); }
+
+
 public:
 
                 #if defined(TWI1)                   //more than 1 twi instance available
-Twis            (TWI_t& twi = TWI0) : twi_(twi){}   //specify when creating instance (default is TWI0)
+Twis            (const TwiPinsT& pins, TWI_t& twi = TWI0) : twi_(twi){ initPins(pins); }
                 #else                               //else twi_ is already set to TWI0
-Twis            (TWI_t& twi = TWI0){ (void)twi; }   //provide a constructor that does nothing so if user
+Twis            (const TwiPinsT& pins, TWI_t& twi = TWI0){ (void)twi; initPins(pins); instance_[0] = this; } //twi_ is already set to TWI0
                 #endif                              //does create with TWI0, it will be harmless
 
                 auto
@@ -218,7 +238,6 @@ on              (u8 addr, CallbackT cb)
                 if( ! cb ) return;                  //do not accept callback set to 0
                 isrFuncCallback_ = cb;
                 off_();                             //will also clear flags
-                initPins();                         //init pins
                 address1( addr );
                 irqAllOn();
                 on_();
@@ -243,3 +262,4 @@ addressMask     (u8 v) { address2(v, false); }      //address mask (no 2nd addre
                 }; // Twis class
 
 
+#endif //defined(TWIM0_ISR_ENABLE) && TWIM0_ISR_ENABLE

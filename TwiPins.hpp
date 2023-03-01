@@ -17,22 +17,22 @@ default SDA      PA2          PB1         PA1
 
 
 
-    uncomment the set of pins that suits your mcu (instead of using a 
+    uncomment the set of pins that suits your mcu (instead of using a
     series of ifdef's which get harder to manage as more mcu's are added)
 
     add more as needed (can also add twi1_ pins if needed)
 
-    portmux register names are not all the same, and the twi 
+    portmux register names are not all the same, and the twi
     bitfields in the portmux register also can be different
     so will have to look these names up when creating a new
     pair of pins
 
     master/slave pins are the same for many mcu's, but is split so one can
-    use dual mode for those mcu's which are able to use a different set of 
+    use dual mode for those mcu's which are able to use a different set of
     pins for master/slave
 ------------------------------------------------------------------------------*/
-                using 
-TwiPins         = struct {
+struct
+TwiPinsT        {
                 PORT_t* Mport;              // master port- &PORTn
                 uint8_t MpinSCL;            // 0-7
                 uint8_t MpinSCA;            // 0-7
@@ -49,32 +49,28 @@ TwiPins         = struct {
 // mega0
 //------------------------------
 //                 static const TwiPins //std
-// twi0_pins       = { &PORTA, 3, 2, &PORTA, 3, 2, &PORTMUX_TWISPIROUTEA, PORTMUX_TWI0_gm, 0 };
+// TWI0_pins       = { &PORTA, 3, 2, &PORTA, 3, 2, &PORTMUX_TWISPIROUTEA, PORTMUX_TWI0_gm, 0 };
 //                 static const TwiPins //alt
-// twi0_pins       = { &PORTC, 3, 2,  &PORTC, 3, 2, &PORTMUX_TWISPIROUTEA, PORTMUX_TWI0_gm, PORTMUX_TWI0_ALT2_gc };
+// TWI0_pins       = { &PORTC, 3, 2,  &PORTC, 3, 2, &PORTMUX_TWISPIROUTEA, PORTMUX_TWI0_gm, PORTMUX_TWI0_ALT2_gc };
 
 //------------------------------
 // avrda
 //------------------------------
 //                 static const TwiPins //std
-// twi0_pins       = { &PORTA, 3, 2, &PORTA, 3, 2, &PORTMUX_TWIROUTEA, PORTMUX_TWI0_gm, 0 };
+// TWI0_pins       = { &PORTA, 3, 2, &PORTA, 3, 2, &PORTMUX_TWIROUTEA, PORTMUX_TWI0_gm, 0 };
 //                 static const TwiPins //alt
-// twi0_pins       = { &PORTC, 3, 2, &PORTC, 3, 2, &PORTMUX_TWIROUTEA, PORTMUX_TWI0_gm, PORTMUX_TWI0_ALT2_gc };
+// TWI0_pins       = { &PORTC, 3, 2, &PORTC, 3, 2, &PORTMUX_TWIROUTEA, PORTMUX_TWI0_gm, PORTMUX_TWI0_ALT2_gc };
 
 //------------------------------
 // tiny0/1 w/alternate pins
 //------------------------------
-                static const TwiPins //std
-twi0_pins       = { &PORTB, 0, 1, &PORTB, 0, 1, &PORTMUX_CTRLB, PORTMUX_TWI0_bm, 0 };
+                static const TwiPinsT //std
+TWI0_pins       = { &PORTB, 0, 1, &PORTB, 0, 1, &PORTMUX_CTRLB, PORTMUX_TWI0_bm, 0 };
 //                 static const TwiPins //alt
-// twi0_pins       = { &PORTA, 2, 1, &PORTA, 2, 1, &PORTMUX_CTRLB, PORTMUX_TWI0_bm, PORTMUX_TWI0_bm };
+// TWI0_pins       = { &PORTA, 2, 1, &PORTA, 2, 1, &PORTMUX_CTRLB, PORTMUX_TWI0_bm, PORTMUX_TWI0_bm };
 
 //------------------------------
 // tiny0/1 no alternate pins
 //------------------------------
 //                 static const TwiPins //std only
-// twi0_std_pins   = { &PORTB, 0, 1, &PORTB, 0, 1, 0, 0, 0 }; //pmux = 0 (no twi portmux)
-
-
-
-
+// TWI0_std_pins   = { &PORTB, 0, 1, &PORTB, 0, 1, 0, 0, 0 }; //pmux = 0 (no twi portmux)

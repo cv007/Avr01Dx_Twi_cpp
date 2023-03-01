@@ -20,6 +20,15 @@ using i16 = int16_t;
 using u32 = uint32_t;
 using i32 = int32_t;
 
+//======================================================================
+//  defines for TWI use- enables master/slave isr in TwiISR.cpp
+//======================================================================
+#define TWIM0_ISR_ENABLE 1
+#define TWIS0_ISR_ENABLE 1
+#if defined(TWI1)
+#define TWIM1_ISR_ENABLE 0
+#define TWIS1_ISR_ENABLE 0
+#endif
 
 //======================================================================
 //  common utility functions

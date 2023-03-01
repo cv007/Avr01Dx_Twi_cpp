@@ -7,14 +7,16 @@
 #include "MyAvr.hpp"
 #include "Twis.hpp"
 #include "Twim.hpp"
+#include "TwiPins.hpp"
 
 /*------------------------------------------------------------------------------
     Twim and Twis instances, defualt TWI0 (only instance avialable on this mcu)
 ------------------------------------------------------------------------------*/
                 Twim
-twim0;
+twim0           { TWI0_pins };
+
                 Twis
-twis0;
+twis0           { TWI0_pins };
 
 /*------------------------------------------------------------------------------
     wait - uses _delay_ms (so we can have a simple callable delay with
@@ -157,21 +159,25 @@ blinkerRunS     (u8 n)
                        BLINKER_OFFTIME };
 
                 //master to slave (blinker)
-                template<int N>
-                static bool
-blinkerWriteM   (u8 reg, const u8(&wbuf)[N])
+                template<int N> static bool
+blinkerWriteM   (const u8 reg, const u8(&wbuf)[N]) //multi-byte write to reg
                 {
-                u8 wr[1] = { reg }; //make it a 1 byte array for writeWrite
                 twim0.baud( 100000ul );
                 twim0.on( BLINKER_SLAVE_ADDRESS );
-                twim0.writeWrite( wr, wbuf ); //write register address, write value(s)
+                twim0.writeWrite( reg, wbuf ); //write register address, write value(s)
                 bool ret = twim0.waitUS( 3000 );
                 twim0.off();
                 return ret;
                 }
 
-                template<int N>
-                static bool
+                static bool //single byte write to reg
+blinkerWriteM   (u8 reg, const u8& wbyte)
+                {
+                u8 wbuf[1] = { wbyte }; //convert to a 1 byte array for blinkerWriteM
+                return blinkerWriteM( reg, wbuf );
+                }
+
+                template<int N> static bool
 blinkerReadM    (u8 reg, u8(&rbuf)[N])
                 {
                 u8 wr[1] = { reg }; //make it a 1 byte array for writeRead
@@ -183,6 +189,13 @@ blinkerReadM    (u8 reg, u8(&rbuf)[N])
                 return ret;
                 }
 
+                static bool
+blinkerReadM    (u8 reg, u8& rbyte)
+                {
+                u8 rbuf[1] = { rbyte }; //convert to a 1 byte array for blinkerReadM
+                return blinkerReadM( reg, rbuf );
+                }
+
                 static void
 blinkerResetM   ()
                 {
@@ -190,7 +203,7 @@ blinkerResetM   ()
                 //for master/slave in this example, so we have to get the slave
                 //to also release the pins so we can access the pins via the
                 //port peripheral
-                twis0.off();
+                twis0.off(); //off to release pins
                 twim0.busRecovery();
                 twis0.on( blinkerS.myAddress, blinkerCallbackS ); //turn the slave back on
                 //turn led on for 10 sec to indicate error
@@ -213,8 +226,8 @@ main            ()
                 //blinker device has ram registers, will use ram[0]
                 //to store a value so we can test reading the slave also
                 //if fails, keep trying
-                //blink N times in loop below (a 1 byte array so can pass as array with length)
-                u8 blinkN[1] = { 5 }; 
+                //blink N times in loop below
+                u8 blinkN = 5;
                 while( ! blinkerWriteM(BLINKER_RAM, blinkN) ){ //write 1 byte, 5 -> ram[0]
                     blinkerResetM();
                     }
@@ -228,18 +241,18 @@ main            ()
 
                 while( 1 ) {
 
-                    for( auto& tbl : onOffTbl ){                       
+                    for( auto& tbl : onOffTbl ){
                         //write 2 values starting at ONTIME register (master->slave)
                         //then get value from register ram[0] (should be same as blinkN initial value above)
-                        if( blinkerWriteM(BLINKER_ONTIME, tbl.onoffMS10) and 
+                        if( blinkerWriteM(BLINKER_ONTIME, tbl.onoffMS10) and
                             blinkerReadM(BLINKER_RAM, blinkN) ) {
                             //then blink N times (slave Blinker is doing this)
-                            blinkerRunS( blinkN[0] );
+                            blinkerRunS( blinkN );
                             waitMS(2000); //2 seconds between blink 'sets'
                             continue; //next pair
                             }
 
-                        //if any errors, do bus recovery (also turns on led for 10 seconds)                                                
+                        //if any errors, do bus recovery (also turns on led for 10 seconds)
                         blinkerResetM();
                         //and start over
                         break;
